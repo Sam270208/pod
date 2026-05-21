@@ -27,12 +27,9 @@ export default function Home() {
 
   async function checkUser() {
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      router.push('/auth')
-      return
-    }
+    if (!user) { router.push('/auth'); return }
     setUserEmail(user.email || '')
-    loadWorkouts()
+    await loadWorkouts()
     setLoading(false)
   }
 
@@ -49,17 +46,13 @@ export default function Home() {
     e.preventDefault()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-
     const { error } = await supabase.from('workouts').insert({
       exercise,
       weight: parseInt(weight),
       reps: parseInt(reps),
       user_id: user.id,
     })
-    if (error) {
-      console.error(error)
-      return
-    }
+    if (error) { console.error(error); return }
     setExercise('')
     setWeight('')
     setReps('')
@@ -73,71 +66,107 @@ export default function Home() {
 
   if (loading) {
     return (
-      <main className="p-8 max-w-md mx-auto">
-        <p className="text-gray-500">Loading...</p>
+      <main className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <p className="text-gray-400 text-sm">Loading...</p>
       </main>
     )
   }
 
   return (
-    <main className="p-8 max-w-md mx-auto">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold">Pod</h1>
+    <main className="min-h-screen bg-gray-50">
+
+      {/* Top nav */}
+      <div className="bg-white border-b border-gray-200 px-4 py-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Pod</h1>
+          <p className="text-xs text-gray-400 mt-0.5">{userEmail}</p>
+        </div>
         <button
           onClick={handleSignOut}
-          className="text-sm text-gray-500 underline"
+          className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded-lg px-3 py-1.5 transition-colors"
         >
           Sign out
         </button>
       </div>
-      <p className="mt-1 text-gray-600 text-sm">{userEmail}</p>
 
-      <form onSubmit={handleSubmit} className="mt-6 space-y-3">
-        <input
-          className="w-full border rounded p-2"
-          placeholder="Exercise (e.g. Squat)"
-          value={exercise}
-          onChange={(e) => setExercise(e.target.value)}
-          required
-        />
-        <input
-          className="w-full border rounded p-2"
-          placeholder="Weight (kg)"
-          type="number"
-          value={weight}
-          onChange={(e) => setWeight(e.target.value)}
-          required
-        />
-        <input
-          className="w-full border rounded p-2"
-          placeholder="Reps"
-          type="number"
-          value={reps}
-          onChange={(e) => setReps(e.target.value)}
-          required
-        />
-        <button
-          type="submit"
-          className="w-full bg-green-600 text-white p-2 rounded font-medium"
-        >
-          Log workout
-        </button>
-      </form>
+      <div className="max-w-md mx-auto px-4 py-6 space-y-6">
 
-      <div className="mt-8">
-        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
-          Recent
-        </h2>
-        <ul className="mt-3 space-y-2">
-          {workouts.map((w) => (
-            <li key={w.id} className="border rounded p-3">
-              <div className="font-medium">{w.exercise}</div>
-              <div className="text-sm text-gray-600">
-                {w.weight}kg × {w.reps}
-              </div>
-            </li>
-          ))}
-        </ul>
+        {/* Log workout card */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
+          <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wide mb-4">
+            Log workout
+          </h2>
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <input
+              className="w-full border border-gray-200 rounded-xl p-3 text-sm bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500"
+              placeholder="Exercise (e.g. Squat)"
+              value={exercise}
+              onChange={(e) => setExercise(e.target.value)}
+              required
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <input
+                className="border border-gray-200 rounded-xl p-3 text-sm bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500"
+                placeholder="Weight (kg)"
+                type="number"
+                value={weight}
+                onChange={(e) => setWeight(e.target.value)}
+                required
+              />
+              <input
+                className="border border-gray-200 rounded-xl p-3 text-sm bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500"
+                placeholder="Reps"
+                type="number"
+                value={reps}
+                onChange={(e) => setReps(e.target.value)}
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              className="w-full bg-green-600 hover:bg-green-700 text-white p-3 rounded-xl font-medium text-sm transition-colors"
+            >
+              Log workout
+            </button>
+          </form>
+        </div>
+
+        {/* Recent workouts */}
+        <div>
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
+            Recent
+          </h2>
+          {workouts.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center">
+              <p className="text-gray-400 text-sm">No workouts yet.</p>
+              <p className="text-gray-300 text-xs mt-1">Log your first one above.</p>
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {workouts.map((w) => (
+                <li
+                  key={w.id}
+                  className="bg-white rounded-2xl border border-gray-200 p-4 flex items-center justify-between shadow-sm"
+                >
+                  <div>
+                    <div className="font-medium text-gray-900 text-sm">{w.exercise}</div>
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      {new Date(w.created_at).toLocaleDateString('en-AU', {
+                        weekday: 'short', day: 'numeric', month: 'short'
+                      })}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="inline-flex items-center gap-1 bg-green-50 text-green-700 text-xs font-medium px-2.5 py-1 rounded-full">
+                      {w.weight}kg × {w.reps}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
       </div>
     </main>
   )
