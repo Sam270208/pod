@@ -33,22 +33,15 @@ type Pod = {
 export default function Home() {
   const router = useRouter()
 
-  // Auth
   const [userEmail, setUserEmail] = useState('')
   const [userId, setUserId] = useState('')
   const [loading, setLoading] = useState(true)
-
-  // Sessions
   const [sessions, setSessions] = useState<Session[]>([])
-
-  // Active workout
   const [activeSession, setActiveSession] = useState<Exercise[]>([])
   const [exercise, setExercise] = useState('')
   const [weight, setWeight] = useState('')
   const [reps, setReps] = useState('')
   const [saving, setSaving] = useState(false)
-
-  // Pod
   const [pod, setPod] = useState<Pod | null>(null)
   const [podView, setPodView] = useState<'none' | 'create' | 'join'>('none')
   const [podName, setPodName] = useState('')
@@ -56,9 +49,7 @@ export default function Home() {
   const [podLoading, setPodLoading] = useState(false)
   const [podError, setPodError] = useState('')
   const [showInviteCode, setShowInviteCode] = useState(false)
-  const [memberEmails, setMemberEmails] = useState<string[]>([])
-
-  // Tab
+  const [memberCount, setMemberCount] = useState(0)
   const [tab, setTab] = useState<'log' | 'feed'>('log')
 
   useEffect(() => { checkUser() }, [])
@@ -92,10 +83,7 @@ export default function Home() {
       .from('pod_members')
       .select('user_id')
       .eq('pod_id', podId)
-
-    if (data) {
-      setMemberEmails(data.map((m: { user_id: string }) => m.user_id))
-    }
+    if (data) setMemberCount(data.length)
   }
 
   async function loadSessions() {
@@ -120,28 +108,31 @@ export default function Home() {
   async function finishSession() {
     if (activeSession.length === 0) return
     setSaving(true)
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    const { data: sessionData, error: sessionError } = await supabase
-      .from('sessions')
-      .insert({ user_id: user.id })
-      .select()
-      .single()
-    if (sessionError || !sessionData) { console.error(sessionError); setSaving(false); return }
-    const { error: workoutsError } = await supabase
-      .from('workouts')
-      .insert(activeSession.map(ex => ({
-        exercise: ex.exercise,
-        weight: parseInt(ex.weight),
-        reps: parseInt(ex.reps),
-        user_id: user.id,
-        session_id: sessionData.id,
-      })))
-    if (workoutsError) { console.error(workoutsError); setSaving(false); return }
-    setActiveSession([])
-    setSaving(false)
-    await loadSessions()
-    setTab('feed')
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { data: sessionData, error: sessionError } = await supabase
+        .from('sessions')
+        .insert({ user_id: user.id })
+        .select()
+        .single()
+      if (sessionError || !sessionData) { console.error(sessionError); return }
+      const { error: workoutsError } = await supabase
+        .from('workouts')
+        .insert(activeSession.map(ex => ({
+          exercise: ex.exercise,
+          weight: parseInt(ex.weight),
+          reps: parseInt(ex.reps),
+          user_id: user.id,
+          session_id: sessionData.id,
+        })))
+      if (workoutsError) { console.error(workoutsError); return }
+      setActiveSession([])
+      await loadSessions()
+      setTab('feed')
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function createPod() {
@@ -174,7 +165,7 @@ export default function Home() {
     }
 
     setPod(newPod)
-    setMemberEmails([user.id])
+    setMemberCount(1)
     setPodView('none')
     setPodName('')
     setPodLoading(false)
@@ -293,7 +284,6 @@ export default function Home() {
         {/* ── LOG TAB ── */}
         {tab === 'log' && (
           <>
-            {/* Workout logger */}
             <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
               <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wide mb-4">
                 {activeSession.length === 0 ? 'Start a session' : 'Add exercise'}
@@ -361,7 +351,7 @@ export default function Home() {
                   <div className="flex items-center justify-between mb-3">
                     <div>
                       <p className="text-sm font-semibold text-gray-900">{pod.name}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">{memberEmails.length} member{memberEmails.length !== 1 ? 's' : ''}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{memberCount} member{memberCount !== 1 ? 's' : ''}</p>
                     </div>
                     <button
                       onClick={() => setShowInviteCode(!showInviteCode)}
