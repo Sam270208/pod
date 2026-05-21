@@ -4,22 +4,36 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
-type Workout = {
-  id: number
+type Exercise = {
   exercise: string
-  weight: number
-  reps: number
+  weight: string
+  reps: string
+}
+
+type Session = {
+  id: string
   created_at: string
+  note: string | null
+  workouts: {
+    id: number
+    exercise: string
+    weight: number
+    reps: number
+  }[]
 }
 
 export default function Home() {
   const router = useRouter()
-  const [workouts, setWorkouts] = useState<Workout[]>([])
+  const [sessions, setSessions] = useState<Session[]>([])
+  const [userEmail, setUserEmail] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  // Current session being built
+  const [activeSession, setActiveSession] = useState<Exercise[]>([])
   const [exercise, setExercise] = useState('')
   const [weight, setWeight] = useState('')
   const [reps, setReps] = useState('')
-  const [userEmail, setUserEmail] = useState('')
-  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     checkUser()
@@ -29,34 +43,71 @@ export default function Home() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/auth'); return }
     setUserEmail(user.email || '')
-    await loadWorkouts()
+    await loadSessions()
     setLoading(false)
   }
 
-  async function loadWorkouts() {
+  async function loadSessions() {
     const { data, error } = await supabase
-      .from('workouts')
-      .select('*')
+      .from('sessions')
+      .select('*, workouts(*)')
       .order('created_at', { ascending: false })
+      .limit(20)
     if (error) console.error(error)
-    else setWorkouts(data || [])
+    else setSessions(data || [])
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  function addExercise(e: React.FormEvent) {
     e.preventDefault()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    const { error } = await supabase.from('workouts').insert({
-      exercise,
-      weight: parseInt(weight),
-      reps: parseInt(reps),
-      user_id: user.id,
-    })
-    if (error) { console.error(error); return }
+    if (!exercise || !weight || !reps) return
+    setActiveSession([...activeSession, { exercise, weight, reps }])
     setExercise('')
     setWeight('')
     setReps('')
-    loadWorkouts()
+  }
+
+  async function finishSession() {
+    if (activeSession.length === 0) return
+    setSaving(true)
+
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    // Create session
+    const { data: sessionData, error: sessionError } = await supabase
+      .from('sessions')
+      .insert({ user_id: user.id })
+      .select()
+      .single()
+
+    if (sessionError || !sessionData) {
+      console.error(sessionError)
+      setSaving(false)
+      return
+    }
+
+    // Insert all exercises
+    const { error: workoutsError } = await supabase
+      .from('workouts')
+      .insert(
+        activeSession.map(ex => ({
+          exercise: ex.exercise,
+          weight: parseInt(ex.weight),
+          reps: parseInt(ex.reps),
+          user_id: user.id,
+          session_id: sessionData.id,
+        }))
+      )
+
+    if (workoutsError) {
+      console.error(workoutsError)
+      setSaving(false)
+      return
+    }
+
+    setActiveSession([])
+    setSaving(false)
+    await loadSessions()
   }
 
   async function handleSignOut() {
@@ -91,12 +142,13 @@ export default function Home() {
 
       <div className="max-w-md mx-auto px-4 py-6 space-y-6">
 
-        {/* Log workout card */}
+        {/* Add exercise form */}
         <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
           <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wide mb-4">
-            Log workout
+            {activeSession.length === 0 ? 'Start a session' : 'Add exercise'}
           </h2>
-          <form onSubmit={handleSubmit} className="space-y-3">
+
+          <form onSubmit={addExercise} className="space-y-3">
             <input
               className="w-full border border-gray-200 rounded-xl p-3 text-sm bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500"
               placeholder="Exercise (e.g. Squat)"
@@ -124,42 +176,77 @@ export default function Home() {
             </div>
             <button
               type="submit"
-              className="w-full bg-green-600 hover:bg-green-700 text-white p-3 rounded-xl font-medium text-sm transition-colors"
+              className="w-full bg-gray-900 hover:bg-gray-700 text-white p-3 rounded-xl font-medium text-sm transition-colors"
             >
-              Log workout
+              + Add exercise
             </button>
           </form>
+
+          {/* Active session preview */}
+          {activeSession.length > 0 && (
+            <div className="mt-4 space-y-2">
+              <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">
+                This session ({activeSession.length} exercise{activeSession.length > 1 ? 's' : ''})
+              </p>
+              {activeSession.map((ex, i) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2"
+                >
+                  <span className="text-sm text-gray-900">{ex.exercise}</span>
+                  <span className="text-xs text-gray-500">{ex.weight}kg × {ex.reps}</span>
+                </div>
+              ))}
+              <button
+                onClick={finishSession}
+                disabled={saving}
+                className="w-full bg-green-600 hover:bg-green-700 text-white p-3 rounded-xl font-medium text-sm transition-colors disabled:opacity-50 mt-2"
+              >
+                {saving ? 'Saving...' : '✓ Finish session'}
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Recent workouts */}
+        {/* Past sessions */}
         <div>
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
-            Recent
+            Recent sessions
           </h2>
-          {workouts.length === 0 ? (
+          {sessions.length === 0 ? (
             <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center">
-              <p className="text-gray-400 text-sm">No workouts yet.</p>
+              <p className="text-gray-400 text-sm">No sessions yet.</p>
               <p className="text-gray-300 text-xs mt-1">Log your first one above.</p>
             </div>
           ) : (
-            <ul className="space-y-2">
-              {workouts.map((w) => (
+            <ul className="space-y-3">
+              {sessions.map((s) => (
                 <li
-                  key={w.id}
-                  className="bg-white rounded-2xl border border-gray-200 p-4 flex items-center justify-between shadow-sm"
+                  key={s.id}
+                  className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm"
                 >
-                  <div>
-                    <div className="font-medium text-gray-900 text-sm">{w.exercise}</div>
-                    <div className="text-xs text-gray-400 mt-0.5">
-                      {new Date(w.created_at).toLocaleDateString('en-AU', {
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs text-gray-400">
+                      {new Date(s.created_at).toLocaleDateString('en-AU', {
                         weekday: 'short', day: 'numeric', month: 'short'
                       })}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <span className="inline-flex items-center gap-1 bg-green-50 text-green-700 text-xs font-medium px-2.5 py-1 rounded-full">
-                      {w.weight}kg × {w.reps}
                     </span>
+                    <span className="text-xs text-gray-400">
+                      {s.workouts?.length || 0} exercises
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {s.workouts?.map((w) => (
+                      <div
+                        key={w.id}
+                        className="flex items-center justify-between"
+                      >
+                        <span className="text-sm text-gray-900">{w.exercise}</span>
+                        <span className="inline-flex items-center bg-green-50 text-green-700 text-xs font-medium px-2 py-0.5 rounded-full">
+                          {w.weight}kg × {w.reps}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </li>
               ))}
