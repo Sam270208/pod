@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useRouter } from 'next/navigation'
 
 type Workout = {
   id: number
@@ -12,10 +13,28 @@ type Workout = {
 }
 
 export default function Home() {
+  const router = useRouter()
   const [workouts, setWorkouts] = useState<Workout[]>([])
   const [exercise, setExercise] = useState('')
   const [weight, setWeight] = useState('')
   const [reps, setReps] = useState('')
+  const [userEmail, setUserEmail] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    checkUser()
+  }, [])
+
+  async function checkUser() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      router.push('/auth')
+      return
+    }
+    setUserEmail(user.email || '')
+    loadWorkouts()
+    setLoading(false)
+  }
 
   async function loadWorkouts() {
     const { data, error } = await supabase
@@ -26,16 +45,16 @@ export default function Home() {
     else setWorkouts(data || [])
   }
 
-  useEffect(() => {
-    loadWorkouts()
-  }, [])
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
     const { error } = await supabase.from('workouts').insert({
       exercise,
       weight: parseInt(weight),
       reps: parseInt(reps),
+      user_id: user.id,
     })
     if (error) {
       console.error(error)
@@ -47,12 +66,31 @@ export default function Home() {
     loadWorkouts()
   }
 
+  async function handleSignOut() {
+    await supabase.auth.signOut()
+    router.push('/auth')
+  }
+
+  if (loading) {
+    return (
+      <main className="p-8 max-w-md mx-auto">
+        <p className="text-gray-500">Loading...</p>
+      </main>
+    )
+  }
+
   return (
     <main className="p-8 max-w-md mx-auto">
-      <h1 className="text-3xl font-bold">Pod</h1>
-      <p className="mt-2 text-gray-600">
-        Accountability for people who train with mates.
-      </p>
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold">Pod</h1>
+        <button
+          onClick={handleSignOut}
+          className="text-sm text-gray-500 underline"
+        >
+          Sign out
+        </button>
+      </div>
+      <p className="mt-1 text-gray-600 text-sm">{userEmail}</p>
 
       <form onSubmit={handleSubmit} className="mt-6 space-y-3">
         <input
