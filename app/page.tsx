@@ -717,6 +717,11 @@ export default function Home() {
                   const dateStr = `${calYear}-${mm}-${dd}`
                   const daySessions = sessionsForDay(dateStr)
                   const hasSession = daySessions.length > 0
+                  // Pod mates (not the user) who trained this day
+                  const podMateSessionsDay = pod
+                    ? sessions.filter(s => s.user_id !== userId && podMemberIds.includes(s.user_id) && toLocalDateStr(s.created_at) === dateStr)
+                    : []
+                  const hasPodMate = podMateSessionsDay.length > 0
                   const isSelected = calSelectedDate === dateStr
                   const isToday = dateStr === todayStr
                   const isFuture = dateStr > todayStr
@@ -739,12 +744,15 @@ export default function Home() {
                       }`}
                     >
                       <span className="text-xs font-medium leading-none">{day}</span>
-                      {hasSession && (
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full mt-0.5 ${
-                            isSelected ? 'bg-white' : 'bg-green-500'
-                          }`}
-                        />
+                      {(hasSession || hasPodMate) && (
+                        <div className="flex items-center gap-0.5 mt-0.5">
+                          {hasSession && (
+                            <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white' : 'bg-green-500'}`} />
+                          )}
+                          {hasPodMate && (
+                            <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white/60' : 'bg-blue-400'}`} />
+                          )}
+                        </div>
                       )}
                     </button>
                   )
@@ -752,13 +760,19 @@ export default function Home() {
               </div>
 
               {/* Legend */}
-              <div className="flex items-center gap-3 mt-4 pt-4 border-t border-gray-100">
+              <div className="flex items-center gap-4 mt-4 pt-4 border-t border-gray-100 flex-wrap">
                 <div className="flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
-                  <span className="text-xs text-gray-400">Session logged</span>
+                  <span className="text-xs text-gray-400">You trained</span>
                 </div>
+                {pod && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 inline-block" />
+                    <span className="text-xs text-gray-400">Pod mate trained</span>
+                  </div>
+                )}
                 <div className="flex items-center gap-1.5">
-                  <span className="w-6 h-6 rounded-lg bg-green-50 border border-green-100 inline-block" />
+                  <span className="w-5 h-5 rounded-lg bg-green-50 border border-green-100 inline-block" />
                   <span className="text-xs text-gray-400">Today</span>
                 </div>
               </div>
@@ -766,27 +780,46 @@ export default function Home() {
 
             {/* Selected day detail */}
             {calSelectedDate && (() => {
-              const daySessions = sessionsForDay(calSelectedDate)
-              // Use noon to avoid timezone shifts when formatting
+              // Collect all sessions for this day from the pod (or just the user if no pod)
+              const relevantIds = pod ? podMemberIds : [userId]
+              const allDaySessions = sessions
+                .filter(s =>
+                  (relevantIds.length === 0 || relevantIds.includes(s.user_id)) &&
+                  toLocalDateStr(s.created_at) === calSelectedDate
+                )
+                .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+
               const labelDate = new Date(calSelectedDate + 'T12:00:00')
               return (
                 <div>
                   <p className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-2 px-1">
                     {labelDate.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' })}
                   </p>
-                  {daySessions.length === 0 ? (
+                  {allDaySessions.length === 0 ? (
                     <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center">
                       <p className="text-2xl mb-2">💤</p>
                       <p className="text-gray-400 text-sm font-medium">Rest day</p>
-                      <p className="text-gray-300 text-xs mt-1">No sessions logged on this day.</p>
+                      <p className="text-gray-300 text-xs mt-1">
+                        {pod ? 'Nobody in the pod trained this day.' : 'No sessions logged on this day.'}
+                      </p>
                     </div>
                   ) : (
                     <ul className="space-y-3">
-                      {daySessions.map(s => (
+                      {allDaySessions.map(s => (
                         <li key={s.id} className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
-                          <p className="text-xs text-gray-400 font-medium mb-3">
-                            🕐 {formatTime(s.created_at)} · {s.workouts?.length ?? 0} exercise{(s.workouts?.length ?? 0) !== 1 ? 's' : ''}
-                          </p>
+                          {/* Who + when */}
+                          <div className="flex items-center gap-2.5 mb-3">
+                            <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0 ${getAvatarBg(s.user_id)}`}>
+                              {getInitials(s.user_id)}
+                            </div>
+                            <div>
+                              <p className="text-sm font-semibold text-gray-900 leading-tight">{getDisplayName(s.user_id)}</p>
+                              <p className="text-xs text-gray-400">
+                                🕐 {formatTime(s.created_at)} · {s.workouts?.length ?? 0} exercise{(s.workouts?.length ?? 0) !== 1 ? 's' : ''}
+                              </p>
+                            </div>
+                          </div>
+                          {/* Exercises */}
                           <div className="space-y-1.5">
                             {s.workouts?.map(w => (
                               <div key={w.id} className="flex items-center justify-between">
