@@ -70,7 +70,7 @@ export default function Home() {
   const [podError, setPodError] = useState('')
   const [showInviteCode, setShowInviteCode] = useState(false)
   const [memberCount, setMemberCount] = useState(0)
-  const [tab, setTab] = useState<'log' | 'feed' | 'settings'>('log')
+  const [tab, setTab] = useState<'log' | 'feed' | 'calendar' | 'settings'>('log')
   const [profiles, setProfiles] = useState<Record<string, Profile>>({})
   const [podMemberIds, setPodMemberIds] = useState<string[]>([])
   // Settings
@@ -78,6 +78,11 @@ export default function Home() {
   const [settingColor, setSettingColor] = useState('green')
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [settingsSaved, setSettingsSaved] = useState(false)
+  // Calendar
+  const [calViewDate, setCalViewDate] = useState<Date>(() => {
+    const d = new Date(); d.setDate(1); return d
+  })
+  const [calSelectedDate, setCalSelectedDate] = useState<string | null>(null)
 
   useEffect(() => { checkUser() }, [])
 
@@ -127,7 +132,6 @@ export default function Home() {
       const ids = data.map(m => m.user_id)
       setMemberCount(ids.length)
       setPodMemberIds(ids)
-      // Load profiles for all members
       if (ids.length > 0) {
         const { data: profileData } = await supabase
           .from('profiles')
@@ -147,7 +151,7 @@ export default function Home() {
       .from('sessions')
       .select('*, workouts(*)')
       .order('created_at', { ascending: false })
-      .limit(30)
+      .limit(200)
     if (error) console.error(error)
     else setSessions(data || [])
   }
@@ -334,6 +338,28 @@ export default function Home() {
     return '?'
   }
 
+  // Returns YYYY-MM-DD in local timezone
+  function toLocalDateStr(ts: string | Date) {
+    return new Date(ts).toLocaleDateString('en-CA') // en-CA gives YYYY-MM-DD
+  }
+
+  // Sessions logged by the current user on a given date (local timezone)
+  function sessionsForDay(dateStr: string) {
+    return sessions.filter(s => s.user_id === userId && toLocalDateStr(s.created_at) === dateStr)
+  }
+
+  // Calendar computed values
+  const calYear = calViewDate.getFullYear()
+  const calMonth = calViewDate.getMonth()
+  const calDaysInMonth = new Date(calYear, calMonth + 1, 0).getDate()
+  const calFirstDow = new Date(calYear, calMonth, 1).getDay() // 0=Sun
+  const calStartOffset = (calFirstDow + 6) % 7 // shift to Monday-first
+  const todayStr = toLocalDateStr(new Date())
+  const today = new Date()
+  const isCurrentOrFutureMonth =
+    calYear > today.getFullYear() ||
+    (calYear === today.getFullYear() && calMonth >= today.getMonth())
+
   // Only show sessions from pod members
   const feedSessions = pod
     ? sessions.filter(s => podMemberIds.length === 0 || podMemberIds.includes(s.user_id))
@@ -364,10 +390,10 @@ export default function Home() {
       </div>
 
       {/* Tab bar */}
-      <div className="bg-white border-b border-gray-200 px-4 flex gap-4">
+      <div className="bg-white border-b border-gray-200 px-4 flex gap-4 overflow-x-auto">
         <button
           onClick={() => setTab('log')}
-          className={`py-3 text-sm font-medium border-b-2 transition-colors ${
+          className={`py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
             tab === 'log'
               ? 'border-green-600 text-green-600'
               : 'border-transparent text-gray-400 hover:text-gray-600'
@@ -377,7 +403,7 @@ export default function Home() {
         </button>
         <button
           onClick={() => setTab('feed')}
-          className={`py-3 text-sm font-medium border-b-2 transition-colors ${
+          className={`py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
             tab === 'feed'
               ? 'border-green-600 text-green-600'
               : 'border-transparent text-gray-400 hover:text-gray-600'
@@ -386,8 +412,18 @@ export default function Home() {
           Feed {pod ? `· ${pod.name}` : ''}
         </button>
         <button
+          onClick={() => setTab('calendar')}
+          className={`py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+            tab === 'calendar'
+              ? 'border-green-600 text-green-600'
+              : 'border-transparent text-gray-400 hover:text-gray-600'
+          }`}
+        >
+          Calendar
+        </button>
+        <button
           onClick={() => setTab('settings')}
-          className={`py-3 text-sm font-medium border-b-2 transition-colors ${
+          className={`py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
             tab === 'settings'
               ? 'border-green-600 text-green-600'
               : 'border-transparent text-gray-400 hover:text-gray-600'
@@ -621,6 +657,159 @@ export default function Home() {
                   </li>
                 ))}
               </ul>
+            )}
+          </>
+        )}
+
+        {/* ── CALENDAR TAB ── */}
+        {tab === 'calendar' && (
+          <>
+            <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
+              {/* Month navigation */}
+              <div className="flex items-center justify-between mb-5">
+                <button
+                  onClick={() => {
+                    setCalSelectedDate(null)
+                    setCalViewDate(new Date(calYear, calMonth - 1, 1))
+                  }}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors text-lg leading-none"
+                >
+                  ‹
+                </button>
+                <h2 className="text-sm font-semibold text-gray-900">
+                  {calViewDate.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })}
+                </h2>
+                <button
+                  onClick={() => {
+                    if (!isCurrentOrFutureMonth) {
+                      setCalSelectedDate(null)
+                      setCalViewDate(new Date(calYear, calMonth + 1, 1))
+                    }
+                  }}
+                  disabled={isCurrentOrFutureMonth}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-30 disabled:cursor-not-allowed text-lg leading-none"
+                >
+                  ›
+                </button>
+              </div>
+
+              {/* Day-of-week headers */}
+              <div className="grid grid-cols-7 mb-1">
+                {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(d => (
+                  <div key={d} className="text-center text-xs text-gray-400 font-medium py-1">
+                    {d}
+                  </div>
+                ))}
+              </div>
+
+              {/* Day cells */}
+              <div className="grid grid-cols-7">
+                {/* Leading empty cells */}
+                {Array.from({ length: calStartOffset }).map((_, i) => (
+                  <div key={`empty-${i}`} />
+                ))}
+
+                {/* Actual days */}
+                {Array.from({ length: calDaysInMonth }).map((_, i) => {
+                  const day = i + 1
+                  const mm = String(calMonth + 1).padStart(2, '0')
+                  const dd = String(day).padStart(2, '0')
+                  const dateStr = `${calYear}-${mm}-${dd}`
+                  const daySessions = sessionsForDay(dateStr)
+                  const hasSession = daySessions.length > 0
+                  const isSelected = calSelectedDate === dateStr
+                  const isToday = dateStr === todayStr
+                  const isFuture = dateStr > todayStr
+
+                  return (
+                    <button
+                      key={day}
+                      onClick={() => {
+                        if (!isFuture) setCalSelectedDate(isSelected ? null : dateStr)
+                      }}
+                      disabled={isFuture}
+                      className={`flex flex-col items-center justify-center rounded-xl mx-0.5 my-0.5 h-10 transition-colors disabled:cursor-not-allowed ${
+                        isSelected
+                          ? 'bg-green-600 text-white'
+                          : isToday
+                          ? 'bg-green-50 text-green-700 font-semibold'
+                          : isFuture
+                          ? 'text-gray-200'
+                          : 'text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      <span className="text-xs font-medium leading-none">{day}</span>
+                      {hasSession && (
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full mt-0.5 ${
+                            isSelected ? 'bg-white' : 'bg-green-500'
+                          }`}
+                        />
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Legend */}
+              <div className="flex items-center gap-3 mt-4 pt-4 border-t border-gray-100">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+                  <span className="text-xs text-gray-400">Session logged</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-6 h-6 rounded-lg bg-green-50 border border-green-100 inline-block" />
+                  <span className="text-xs text-gray-400">Today</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Selected day detail */}
+            {calSelectedDate && (() => {
+              const daySessions = sessionsForDay(calSelectedDate)
+              // Use noon to avoid timezone shifts when formatting
+              const labelDate = new Date(calSelectedDate + 'T12:00:00')
+              return (
+                <div>
+                  <p className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-2 px-1">
+                    {labelDate.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' })}
+                  </p>
+                  {daySessions.length === 0 ? (
+                    <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center">
+                      <p className="text-2xl mb-2">💤</p>
+                      <p className="text-gray-400 text-sm font-medium">Rest day</p>
+                      <p className="text-gray-300 text-xs mt-1">No sessions logged on this day.</p>
+                    </div>
+                  ) : (
+                    <ul className="space-y-3">
+                      {daySessions.map(s => (
+                        <li key={s.id} className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
+                          <p className="text-xs text-gray-400 font-medium mb-3">
+                            🕐 {formatTime(s.created_at)} · {s.workouts?.length ?? 0} exercise{(s.workouts?.length ?? 0) !== 1 ? 's' : ''}
+                          </p>
+                          <div className="space-y-1.5">
+                            {s.workouts?.map(w => (
+                              <div key={w.id} className="flex items-center justify-between">
+                                <span className="text-sm text-gray-900">{w.exercise}</span>
+                                <span className="inline-flex items-center bg-green-50 text-green-700 text-xs font-medium px-2 py-0.5 rounded-full">
+                                  {w.weight}kg × {w.reps}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )
+            })()}
+
+            {/* Prompt to tap a day */}
+            {!calSelectedDate && (
+              <div className="text-center py-2">
+                <p className="text-xs text-gray-400">Tap any past day to see what you lifted.</p>
+              </div>
             )}
           </>
         )}
