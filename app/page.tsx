@@ -15,7 +15,6 @@ type Session = {
   created_at: string
   note: string | null
   user_id: string
-  user_email?: string
   workouts: {
     id: number
     exercise: string
@@ -28,6 +27,27 @@ type Pod = {
   id: string
   name: string
   invite_code: string
+}
+
+type Profile = {
+  id: string
+  display_name: string | null
+  color: string
+}
+
+const COLOR_PALETTE = ['green', 'blue', 'orange', 'purple', 'pink', 'teal', 'amber', 'red'] as const
+type Color = typeof COLOR_PALETTE[number]
+
+// Full Tailwind class strings (no dynamic construction — needed for purge safety)
+const COLOR_CLASSES: Record<string, { avatar: string; swatch: string; ring: string }> = {
+  green:  { avatar: 'bg-green-600',  swatch: 'bg-green-500',  ring: 'ring-green-500' },
+  blue:   { avatar: 'bg-blue-600',   swatch: 'bg-blue-500',   ring: 'ring-blue-500' },
+  orange: { avatar: 'bg-orange-500', swatch: 'bg-orange-400', ring: 'ring-orange-400' },
+  purple: { avatar: 'bg-purple-600', swatch: 'bg-purple-500', ring: 'ring-purple-500' },
+  pink:   { avatar: 'bg-pink-500',   swatch: 'bg-pink-400',   ring: 'ring-pink-400' },
+  teal:   { avatar: 'bg-teal-600',   swatch: 'bg-teal-500',   ring: 'ring-teal-500' },
+  amber:  { avatar: 'bg-amber-500',  swatch: 'bg-amber-400',  ring: 'ring-amber-400' },
+  red:    { avatar: 'bg-red-500',    swatch: 'bg-red-400',    ring: 'ring-red-400' },
 }
 
 export default function Home() {
@@ -50,7 +70,14 @@ export default function Home() {
   const [podError, setPodError] = useState('')
   const [showInviteCode, setShowInviteCode] = useState(false)
   const [memberCount, setMemberCount] = useState(0)
-  const [tab, setTab] = useState<'log' | 'feed'>('log')
+  const [tab, setTab] = useState<'log' | 'feed' | 'settings'>('log')
+  const [profiles, setProfiles] = useState<Record<string, Profile>>({})
+  const [podMemberIds, setPodMemberIds] = useState<string[]>([])
+  // Settings
+  const [settingName, setSettingName] = useState('')
+  const [settingColor, setSettingColor] = useState('green')
+  const [settingsSaving, setSettingsSaving] = useState(false)
+  const [settingsSaved, setSettingsSaved] = useState(false)
 
   useEffect(() => { checkUser() }, [])
 
@@ -59,8 +86,21 @@ export default function Home() {
     if (!user) { router.push('/auth'); return }
     setUserEmail(user.email || '')
     setUserId(user.id)
-    await Promise.all([loadPod(user.id), loadSessions()])
+    await Promise.all([loadPod(user.id), loadSessions(), loadMyProfile(user.id)])
     setLoading(false)
+  }
+
+  async function loadMyProfile(uid: string) {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, display_name, color')
+      .eq('id', uid)
+      .maybeSingle()
+    if (data) {
+      setSettingName(data.display_name || '')
+      setSettingColor(data.color || 'green')
+      setProfiles(prev => ({ ...prev, [uid]: data }))
+    }
   }
 
   async function loadPod(uid: string) {
@@ -83,7 +123,23 @@ export default function Home() {
       .from('pod_members')
       .select('user_id')
       .eq('pod_id', podId)
-    if (data) setMemberCount(data.length)
+    if (data) {
+      const ids = data.map(m => m.user_id)
+      setMemberCount(ids.length)
+      setPodMemberIds(ids)
+      // Load profiles for all members
+      if (ids.length > 0) {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('id, display_name, color')
+          .in('id', ids)
+        if (profileData) {
+          const map: Record<string, Profile> = {}
+          profileData.forEach(p => { map[p.id] = p })
+          setProfiles(prev => ({ ...prev, ...map }))
+        }
+      }
+    }
   }
 
   async function loadSessions() {
@@ -165,6 +221,7 @@ export default function Home() {
     }
 
     setPod(newPod)
+    setPodMemberIds([user.id])
     setMemberCount(1)
     setPodView('none')
     setPodName('')
@@ -210,6 +267,32 @@ export default function Home() {
     setTab('feed')
   }
 
+  async function saveSettings() {
+    setSettingsSaving(true)
+    setSettingsSaved(false)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setSettingsSaving(false); return }
+
+    const { error } = await supabase
+      .from('profiles')
+      .upsert({
+        id: user.id,
+        display_name: settingName.trim() || null,
+        color: settingColor,
+        email: user.email,
+      }, { onConflict: 'id' })
+
+    if (!error) {
+      setProfiles(prev => ({
+        ...prev,
+        [user.id]: { id: user.id, display_name: settingName.trim() || null, color: settingColor }
+      }))
+      setSettingsSaved(true)
+      setTimeout(() => setSettingsSaved(false), 2000)
+    }
+    setSettingsSaving(false)
+  }
+
   async function handleSignOut() {
     await supabase.auth.signOut()
     router.push('/auth')
@@ -231,6 +314,31 @@ export default function Home() {
     return s.user_id === userId
   }
 
+  function getAvatarBg(uid: string) {
+    const color = profiles[uid]?.color || 'green'
+    return COLOR_CLASSES[color]?.avatar || 'bg-green-600'
+  }
+
+  function getDisplayName(uid: string) {
+    if (uid === userId) return 'You'
+    return profiles[uid]?.display_name || 'Pod mate'
+  }
+
+  function getInitials(uid: string) {
+    if (uid === userId) {
+      const name = profiles[uid]?.display_name
+      return name ? name.charAt(0).toUpperCase() : 'Me'
+    }
+    const name = profiles[uid]?.display_name
+    if (name) return name.charAt(0).toUpperCase()
+    return '?'
+  }
+
+  // Only show sessions from pod members
+  const feedSessions = pod
+    ? sessions.filter(s => podMemberIds.length === 0 || podMemberIds.includes(s.user_id))
+    : []
+
   if (loading) {
     return (
       <main className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -244,7 +352,7 @@ export default function Home() {
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-4 flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Pod</h1>
+          <h1 className="text-xl font-bold text-green-700">Pod 🏋️</h1>
           <p className="text-xs text-gray-400 mt-0.5">{userEmail}</p>
         </div>
         <button
@@ -276,6 +384,16 @@ export default function Home() {
           }`}
         >
           Feed {pod ? `· ${pod.name}` : ''}
+        </button>
+        <button
+          onClick={() => setTab('settings')}
+          className={`py-3 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'settings'
+              ? 'border-green-600 text-green-600'
+              : 'border-transparent text-gray-400 hover:text-gray-600'
+          }`}
+        >
+          Settings
         </button>
       </div>
 
@@ -468,27 +586,27 @@ export default function Home() {
               </div>
             )}
 
-            {pod && sessions.length === 0 && (
+            {pod && feedSessions.length === 0 && (
               <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center">
                 <p className="text-gray-400 text-sm">No sessions yet in {pod.name}.</p>
                 <p className="text-gray-300 text-xs mt-1">Log one or get your mates to join.</p>
               </div>
             )}
 
-            {pod && sessions.length > 0 && (
+            {pod && feedSessions.length > 0 && (
               <ul className="space-y-3">
-                {sessions.map((s) => (
+                {feedSessions.map((s) => (
                   <li key={s.id} className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
                     <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white ${isMySession(s) ? 'bg-green-600' : 'bg-gray-400'}`}>
-                          {isMySession(s) ? 'Me' : '?'}
+                      <div className="flex items-center gap-2.5">
+                        <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0 ${getAvatarBg(s.user_id)}`}>
+                          {getInitials(s.user_id)}
                         </div>
-                        <span className="text-xs text-gray-500">
-                          {isMySession(s) ? 'You' : 'Pod mate'} · {formatDate(s.created_at)}
-                        </span>
+                        <div>
+                          <p className="text-sm font-semibold text-gray-900 leading-tight">{getDisplayName(s.user_id)}</p>
+                          <p className="text-xs text-gray-400">{formatDate(s.created_at)} · {formatTime(s.created_at)}</p>
+                        </div>
                       </div>
-                      <span className="text-xs text-gray-400">{formatTime(s.created_at)}</span>
                     </div>
                     <div className="space-y-1.5">
                       {s.workouts?.map((w) => (
@@ -506,6 +624,81 @@ export default function Home() {
             )}
           </>
         )}
+
+        {/* ── SETTINGS TAB ── */}
+        {tab === 'settings' && (
+          <>
+            <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
+              <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wide mb-4">Your Profile</h2>
+
+              <div className="space-y-5">
+                <div>
+                  <label className="block text-xs text-gray-500 font-medium mb-1.5">Display name</label>
+                  <input
+                    className="w-full border border-gray-200 rounded-xl p-3 text-sm bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="Your name (shown to pod mates)"
+                    value={settingName}
+                    onChange={(e) => setSettingName(e.target.value)}
+                    maxLength={30}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs text-gray-500 font-medium mb-2">Your colour</label>
+                  <div className="flex gap-2.5 flex-wrap">
+                    {COLOR_PALETTE.map(color => (
+                      <button
+                        key={color}
+                        onClick={() => setSettingColor(color)}
+                        className={`w-9 h-9 rounded-full transition-transform hover:scale-110 ${COLOR_CLASSES[color].swatch} ${
+                          settingColor === color
+                            ? `ring-2 ring-offset-2 ${COLOR_CLASSES[color].ring} scale-110`
+                            : ''
+                        }`}
+                        title={color.charAt(0).toUpperCase() + color.slice(1)}
+                        aria-label={color}
+                      />
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-2">
+                    Your mates will see your sessions with this colour in the feed.
+                  </p>
+                </div>
+
+                {/* Live preview */}
+                <div className="bg-gray-50 rounded-xl p-3 flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0 ${COLOR_CLASSES[settingColor]?.avatar || 'bg-green-600'}`}>
+                    {settingName ? settingName.charAt(0).toUpperCase() : 'Me'}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">{settingName || 'Your name'}</p>
+                    <p className="text-xs text-gray-400">How pod mates see you</p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={saveSettings}
+                  disabled={settingsSaving}
+                  className="w-full bg-green-600 hover:bg-green-700 text-white p-3 rounded-xl font-medium text-sm transition-colors disabled:opacity-50"
+                >
+                  {settingsSaving ? 'Saving…' : settingsSaved ? '✓ Saved!' : 'Save changes'}
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
+              <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wide mb-1">Account</h2>
+              <p className="text-xs text-gray-400 mb-4">{userEmail}</p>
+              <button
+                onClick={handleSignOut}
+                className="w-full border border-gray-200 text-gray-600 hover:bg-gray-50 p-3 rounded-xl font-medium text-sm transition-colors"
+              >
+                Sign out
+              </button>
+            </div>
+          </>
+        )}
+
       </div>
     </main>
   )
