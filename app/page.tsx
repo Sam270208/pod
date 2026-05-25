@@ -70,7 +70,7 @@ export default function Home() {
   const [podError, setPodError] = useState('')
   const [showInviteCode, setShowInviteCode] = useState(false)
   const [memberCount, setMemberCount] = useState(0)
-  const [tab, setTab] = useState<'log' | 'feed' | 'calendar' | 'settings'>('log')
+  const [tab, setTab] = useState<'log' | 'feed' | 'calendar' | 'members' | 'settings'>('log')
   const [profiles, setProfiles] = useState<Record<string, Profile>>({})
   const [podMemberIds, setPodMemberIds] = useState<string[]>([])
   // Settings
@@ -420,6 +420,16 @@ export default function Home() {
           }`}
         >
           Calendar
+        </button>
+        <button
+          onClick={() => setTab('members')}
+          className={`py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+            tab === 'members'
+              ? 'border-green-600 text-green-600'
+              : 'border-transparent text-gray-400 hover:text-gray-600'
+          }`}
+        >
+          Members
         </button>
         <button
           onClick={() => setTab('settings')}
@@ -843,6 +853,96 @@ export default function Home() {
               <div className="text-center py-2">
                 <p className="text-xs text-gray-400">Tap any past day to see what you lifted.</p>
               </div>
+            )}
+          </>
+        )}
+
+        {/* ── MEMBERS TAB ── */}
+        {tab === 'members' && (
+          <>
+            {!pod ? (
+              <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center">
+                <p className="text-gray-500 text-sm font-medium">No pod yet</p>
+                <p className="text-gray-300 text-xs mt-1">Create or join a pod to see your members here.</p>
+                <button
+                  onClick={() => setTab('log')}
+                  className="mt-4 text-green-600 text-sm font-medium hover:underline"
+                >
+                  Go set one up →
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="px-1 mb-1">
+                  <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">
+                    {pod.name} · {memberCount} member{memberCount !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                <ul className="space-y-3">
+                  {podMemberIds.map(uid => {
+                    const memberSessions = sessions.filter(s => s.user_id === uid)
+                    // Start of this week (Monday midnight local)
+                    const now = new Date()
+                    const daysSinceMonday = (now.getDay() + 6) % 7
+                    const weekStart = new Date(now)
+                    weekStart.setDate(now.getDate() - daysSinceMonday)
+                    weekStart.setHours(0, 0, 0, 0)
+                    const thisWeekCount = memberSessions.filter(
+                      s => new Date(s.created_at) >= weekStart
+                    ).length
+                    const lastSession = memberSessions[0] // sorted desc
+                    const isMe = uid === userId
+
+                    return (
+                      <li key={uid} className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
+                        <div className="flex items-center gap-3">
+                          {/* Avatar */}
+                          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-base font-bold text-white flex-shrink-0 ${getAvatarBg(uid)}`}>
+                            {getInitials(uid)}
+                          </div>
+                          {/* Info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-semibold text-gray-900 truncate">
+                                {profiles[uid]?.display_name || 'Pod mate'}
+                              </p>
+                              {isMe && (
+                                <span className="text-xs bg-green-50 text-green-600 font-medium px-1.5 py-0.5 rounded-md flex-shrink-0">
+                                  You
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className="text-xs text-gray-500">
+                                <span className="font-semibold text-gray-900">{thisWeekCount}</span> this week
+                              </span>
+                              <span className="text-gray-200 text-xs">·</span>
+                              <span className="text-xs text-gray-500">
+                                <span className="font-semibold text-gray-900">{memberSessions.length}</span> total
+                              </span>
+                            </div>
+                            {lastSession ? (
+                              <p className="text-xs text-gray-400 mt-0.5">
+                                Last: {formatDate(lastSession.created_at)}
+                              </p>
+                            ) : (
+                              <p className="text-xs text-gray-300 mt-0.5">No sessions yet</p>
+                            )}
+                          </div>
+                          {/* This-week bar */}
+                          {thisWeekCount > 0 && (
+                            <div className="flex flex-col items-center gap-1 flex-shrink-0">
+                              {Array.from({ length: Math.min(thisWeekCount, 7) }).map((_, i) => (
+                                <span key={i} className={`w-2 h-2 rounded-full ${getAvatarBg(uid)}`} />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </>
             )}
           </>
         )}
